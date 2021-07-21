@@ -6,4 +6,18 @@
     <string name="remove">Remove</string>
     <string name="check">Check</string>
     <string name="check_internet_connection">Check Internet Connection</string>
+    <string name="password">password</string>
+    <string name="save_config">Set Config</string>
+    <string name="cjm410">CJM410</string>
+    <string name="home_wifi">custom wifi</string>
+    <string name="scan_is_empty">Scan is Empty</string>
+    <string name="password_is_empty">密碼不得空白</string>
+    <string name="custom_ssid_is_empty">無線基地台不得為空</string>
+    <string name="init">CJM410 Initialization</string>
+    <string name="connect_succed">連線成功</string>
+    <string name="connect_fail">連接失敗:</string>
+    <string name="connect_and_search">連接客戶端基地台</string>
+    <string name="cancal">取消</string>
+    <string name="find_ip">取得CJM410的IP</string>
+    <string name="initialization">恢復初始值</string>
 </resources>

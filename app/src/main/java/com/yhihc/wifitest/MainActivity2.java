@@ -9,6 +9,7 @@ import android.net.wifi.ScanResult;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
@@ -61,8 +62,9 @@ public class MainActivity2 extends AppCompatActivity {
     public String password = "Rc54195018";
     public String staSec = "";
     public String netProto = "TCP";
-    public String port = "5000";
-    public String remoteServ = "";
+    //public String port = "5000";
+    public String port = "10006";
+    public String remoteServ = "192.168.1.108";
     public String apChannel = "6";
     public int opmode = 1;
     public String devName = "";
@@ -82,8 +84,12 @@ public class MainActivity2 extends AppCompatActivity {
         showInfo.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                //
-                setWiFiModuleConfig();
+                //取得模組config
+                //getWiFiModuleIp();
+                //寫入模組config
+                //setWiFiModuleConfig();
+                UPD_Client upd_client = new UPD_Client();
+                upd_client.execute();
             }
         });
 
@@ -193,8 +199,112 @@ public class MainActivity2 extends AppCompatActivity {
         }
     }
 
-    /******************** 廠商給的sample code ********************************************/
+    public class UPD_Client extends AsyncTask{
 
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+        }
+
+        @Override
+        protected Object doInBackground(Object[] objects) {
+
+            try {
+                servIpAddr = InetAddress.getByName("192.168.1.10");
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+            }
+
+            DatagramSocket clientSocket = null;
+            byte[] rxData = new byte[512];
+            DatagramPacket dp = new DatagramPacket(rxData, rxData.length);
+
+            boolean setOK = false;
+
+            ArrayList<byte[]> wmcpDataArray = new ArrayList<>();
+
+            wmcpDataArray.add(wmcpDataSetReq(0x11,"0"));      //Client mode
+            wmcpDataArray.add(wmcpDataSetReq(0x14,ssid));             //ssid : HuiKang
+            wmcpDataArray.add(wmcpDataSetReq(0x15, "WPA2"));  //password加密型態
+            String cypher = "AES";
+            String psk = cypher + "," + password;
+            wmcpDataArray.add(wmcpDataSetReq(0x16, psk));            //password
+            wmcpDataArray.add(wmcpDataSetReq(0x23, netProto));       //TCP
+            String client = remoteServ + "," + port;
+            wmcpDataArray.add(wmcpDataSetReq(0x24, client));         //將遠端server寫入
+            wmcpDataArray.add(wmcpDataSetReq(0x32, ""));     //Apply(執行)
+
+            try {
+                clientSocket = new DatagramSocket();
+                for (int i = 0; i < wmcpDataArray.size(); i++) {
+                    byte[] wmcpDataPayload = wmcpDataArray.get(i);
+                    byte cmdcode = wmcpDataPayload[1];
+
+                    DatagramPacket packet = new DatagramPacket(wmcpDataPayload, wmcpDataPayload.length, servIpAddr, 60002);
+                    clientSocket.send(packet);
+                    int retry = 0;
+                    while (retry < 3) {
+                        try {
+                            clientSocket.setSoTimeout(2000);
+                            clientSocket.receive(dp);
+
+                            byte[] data = dp.getData();
+                            if (data[0] == 0x02 &&
+                                    data[1] == cmdcode &&
+                                    data[2] == 0x02) {
+                                // handle rx data
+                                byte[] resp = Arrays.copyOfRange(data, 3, dp.getLength());
+                                String strResp = new String(resp);
+                                String msg = String.format("Set cmdcode %x response=", cmdcode);
+                                Log.i("CJN", msg+strResp);
+                                if (strResp.equals("ok")) {
+                                    setOK = true;
+                                    break;
+                                }
+                                else {
+                                    setOK = false;
+                                    break;
+                                }
+
+
+                            }
+                        } catch (SocketTimeoutException e) {
+                            retry += 1;
+                            clientSocket.send(packet);
+                            String str = String.format("Retry device configuration request : %d", retry);
+                            Log.i("CJN", str);
+                        }
+                    }
+                    if (!setOK)
+                        break;
+                }
+
+            } catch (SocketException e) {
+                if (clientSocket != null) {
+                    clientSocket.close();
+                }
+                return "Socket Exception";
+            } catch (IOException e) {
+                if (clientSocket != null) {
+                    clientSocket.close();
+                }
+                return "IO Exception";
+            }
+
+            if (clientSocket != null) {
+                clientSocket.close();
+            }
+            return "OK";
+        }
+
+        @Override
+        protected void onPostExecute(Object o) {
+            super.onPostExecute(o);
+        }
+    }
+
+    /******************** 廠商給的sample code ********************************************/
+    //get wifi 模組的 address
     public static ArrayList<String> getWiFiModuleIp() {
         ArrayList<String> ipList = new ArrayList<>();
         byte[] broadcast = {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff};
@@ -263,6 +373,7 @@ public class MainActivity2 extends AppCompatActivity {
         return wmcpDataBuffer;
     }
 
+    //set wifi 模組的 config
     public String setWiFiModuleConfig() {
         Log.d(TAG, "setWiFiModuleConfig: SSID:" + ssid + ",password:" + password);
         try {

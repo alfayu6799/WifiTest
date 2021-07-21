@@ -1,21 +1,36 @@
 package com.yhihc.wifitest;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.Manifest;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
+
+import com.thanosfisherman.wifiutils.WifiUtils;
+import com.thanosfisherman.wifiutils.wifiConnect.ConnectionErrorCode;
+import com.thanosfisherman.wifiutils.wifiConnect.ConnectionSuccessListener;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -25,270 +40,254 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
 
-    public InetAddress servIpAddr = null;
-    public String ssid = "";
-    public String password = "";
-    public String staSec = "";
-    public String netProto = "TCP";
-    public String port = "5000";
-    public String remoteServ = "";
+    private ArrayList<String> ipList = new ArrayList<>();
 
-    //
-    private ListView wifiListView;
-    private WifiManager wifiManager;
-    private final int MY_PERMISSIONS_ACCESS_COARSE_LOCATION = 1;
-    WifiReceiver receiverWifi;
-    private Button search;
-    private Button connect;
+    private ImageView searchWifi;
+    private EditText  customPassword;
+    private TextView  customWifiSSID;
+    private Button    saveConfig;
+    private TextView  customWifiInit;
+    private Button    connectCustomSSID;
+
+    private TextView  cjmWifiSSID;
+    private EditText  cjmPassword;
+    private Button    cjmConnect;
+    private Button    cjm410IPAddr;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getSupportActionBar().hide();
         setContentView(R.layout.activity_main);
 
-        //wifi's search result ListView init
-        wifiListView = findViewById(R.id.wifiList);
+        //自動開啟wifi
+        WifiUtils.withContext(getApplicationContext()).enableWifi();
 
-        //wifiManager init
-        wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (!wifiManager.isWifiEnabled()) {  //open wifi device
-            Toast.makeText(getApplicationContext(), "Turning WiFi ON...", Toast.LENGTH_LONG).show();
-            wifiManager.setWifiEnabled(true);
-        }
+        saveConfig = findViewById(R.id.btn_write_conf);                 //write config to cjm410 button
+        saveConfig.setEnabled(false);                                   //write config to cjm410 button disable
 
-        //wifi search button
-        search = findViewById(R.id.button_scan);
-        search.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) { //need ACCESS LOCAL
-                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_COARSE_LOCATION)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            MainActivity.this, new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, MY_PERMISSIONS_ACCESS_COARSE_LOCATION);
-                } else {
-                    wifiManager.startScan();  //search wifi devices
-                }
-            }
-        });
-
-        connect = findViewById(R.id.btnConnect);
-        connect.setOnClickListener(new View.OnClickListener() {
+        cjm410IPAddr = findViewById(R.id.btn_find_ip);
+        cjm410IPAddr.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-
+                FindCJM410Ip findCJM410Ip = new FindCJM410Ip();
+                findCJM410Ip.execute();
             }
         });
-    }
 
-    @Override
-    protected void onPostResume() {
-        super.onPostResume();
-        receiverWifi = new WifiReceiver(wifiManager, wifiListView);
-        IntentFilter intentFilter = new IntentFilter();
-        intentFilter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
-        registerReceiver(receiverWifi, intentFilter);
-        getWifi();
-    }
+        cjmWifiSSID = findViewById(R.id.tv_cjm40);                      //cjm410's ssid
+        cjmPassword = findViewById(R.id.edt_cjm_password);              //cjm410's password
+        cjmConnect = findViewById(R.id.btn_connect);                    //cjm410 connect button
+        cjmConnect.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                //連上cjm410 wifi
+                WifiUtils.withContext(getApplicationContext())
+                        .connectWith(cjmWifiSSID.getText().toString(), cjmPassword.getText().toString())
+                        .setTimeout(4000)
+                        .onConnectionResult(new ConnectionSuccessListener() {
+                            @Override
+                            public void success() {
+                                Toast.makeText(MainActivity.this, getString(R.string.connect_succed), Toast.LENGTH_SHORT).show();
+                                //連上wifi成功後才可以進行寫入config的動作
+                                saveConfig.setEnabled(true);
+                            }
 
-    private void getWifi() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Toast.makeText(MainActivity.this, "version> = marshmallow", Toast.LENGTH_SHORT).show();
-            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(MainActivity.this, "location turned off", Toast.LENGTH_SHORT).show();
-                ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, MY_PERMISSIONS_ACCESS_COARSE_LOCATION);
-            } else {
-                Toast.makeText(MainActivity.this, "location turned on", Toast.LENGTH_SHORT).show();
-                wifiManager.startScan();
+                            @Override
+                            public void failed(@NonNull ConnectionErrorCode errorCode) {
+                                Toast.makeText(MainActivity.this, getString(R.string.connect_fail) + errorCode.toString(), Toast.LENGTH_SHORT).show();
+                            }
+                        }).start();
             }
-        } else {
-            Toast.makeText(MainActivity.this, "scanning", Toast.LENGTH_SHORT).show();
-            wifiManager.startScan();
-        }
-    }
+        });
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        //取消廣播註冊
-        unregisterReceiver(receiverWifi);
-    }
+        customWifiSSID = findViewById(R.id.tv_custom_wifi_ssid);                       //客戶端可上網wifi之SSID
+        customPassword = findViewById(R.id.edt_custom_wifi_ps);                        //客戶端可上網wifi之password
+        customPassword.setInputType(InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);   //password顯示
+        customWifiInit = findViewById(R.id.tv_custom_init);
 
-    @Override  //權限回調
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        switch (requestCode) {
-            case MY_PERMISSIONS_ACCESS_COARSE_LOCATION:
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(MainActivity.this, "permission granted", Toast.LENGTH_SHORT).show();
-                wifiManager.startScan();
-            } else {
-                Toast.makeText(MainActivity.this, "permission not granted", Toast.LENGTH_SHORT).show();
-                return;
+        //搜尋客戶端可以上網的無線基地台
+        searchWifi = findViewById(R.id.iv_wifi_search);
+        searchWifi.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                WifiUtils.withContext(getApplicationContext()).scanWifi(this::getScanResult).start();
             }
-            break;
-        }
-    }
 
-    /******************** 廠商給的sample code ********************************************/
-    public static ArrayList<String> getWiFiModuleIp() {
-        ArrayList<String> ipList = new ArrayList<>();
-        byte[] broadcast = {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff};
-        byte[] getDevInfoReq = {0x01, 0x21, 0x01};
-        byte[] rxData = new byte[1024];
-        DatagramSocket clientSocket = null;
-        Log.d("CJNWiFi","getWiFiModuleIp");
-        DatagramPacket dp = new DatagramPacket(rxData, rxData.length);
-        try {
-            clientSocket = new DatagramSocket();
-            DatagramPacket packet = new DatagramPacket(getDevInfoReq, getDevInfoReq.length, InetAddress.getByAddress(broadcast), 60002);
-            clientSocket.setBroadcast(true);
-            clientSocket.send(packet);
-            while(true){
-                try{
-                    clientSocket.setSoTimeout(2000);
-                    clientSocket.receive(dp);
-
-                    byte[] data = dp.getData();
-                    if (data[0] == 0x02 &&
-                            data[1] == 0x21 &&
-                            data[2] == 0x01) {
-                        // handle rx data
-                        byte[] ip = Arrays.copyOfRange(data, 3, dp.getLength());
-                        String strIp = new String(ip);
-                        if(!ipList.contains(strIp)){
-                            ipList.add(strIp);
-//                            devCount += 1;
-                        }
-                    }
-                }catch (SocketTimeoutException e) {
-                    Log.d("CJNWiFi", "getDevInfo Rx SocketTimeoutException");
-                    // No more device ACK
-                    break;
+            private void getScanResult(List<ScanResult> scanResults) {
+                if (scanResults.isEmpty()){
+                 Toast.makeText(MainActivity.this, getString(R.string.scan_is_empty), Toast.LENGTH_SHORT).show();
+                 return;
                 }
-            }
 
-        } catch (SocketException e) {
-            if(clientSocket != null) {
-                clientSocket.close();
+                //將結果顯示在ListView
+                showSSIDDialog(scanResults);
             }
-        } catch (UnknownHostException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return ipList;
+        });
+
+        //將設定寫到cjm410(客戶端wifi ssid,客戶端wifi password)
+        saveConfig.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                checkBeforeUpdate();
+            }
+        });
+
+        //連接客戶端ssid(for cjm410初始化用)
+        connectCustomSSID = findViewById(R.id.btn_connect_custom_ssid);  //custom wifi connect button
+        connectCustomSSID.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                //1.先連上客戶端wifi(ssid&password)
+                WifiUtils.withContext(getApplicationContext())
+                        .connectWith(customWifiSSID.getText().toString(), customPassword.getText().toString())
+                        .setTimeout(4000)
+                        .onConnectionResult(new ConnectionSuccessListener() {
+                            @Override
+                            public void success() {
+                                Toast.makeText(MainActivity.this, getString(R.string.connect_succed), Toast.LENGTH_SHORT).show();
+                            }
+
+                            @Override
+                            public void failed(@NonNull ConnectionErrorCode errorCode) {
+                                if (errorCode.toString().equals("DID_NOT_FIND_NETWORK_BY_SCANNING")) {
+                                    Toast.makeText(MainActivity.this, getString(R.string.custom_ssid_is_empty), Toast.LENGTH_SHORT).show();
+                                }else {
+                                    Toast.makeText(MainActivity.this, getString(R.string.connect_fail) + errorCode.toString(), Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        }).start();
+            }
+        });
+
+
+        //3.command "0x34" to Restore the system configuration to factory default value and reboot the system
+
+
     }
 
+    //客戶端wifi彈跳視窗
+    private void showSSIDDialog(List<ScanResult> scanResults) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Select wifi to connect");
 
-    private byte[] wmcpDataSetReq(int cmdcode, String params) {
-        byte[] wmcpDataBuffer = new byte[params.length() + 3];
-        wmcpDataBuffer[0] = 0x01;
-        wmcpDataBuffer[1] = (byte)cmdcode;
-        wmcpDataBuffer[2] = 0x02;
+        ArrayAdapter<String> arrayAdapter = new ArrayAdapter<String>(this, android.R.layout.select_dialog_item);
 
-        if (!params.equals("")) {
-            int i, j;
-            byte[] byteParams = params.getBytes();
-
-            j = 3;
-            for (i = 0; i < byteParams.length; i++){
-                wmcpDataBuffer[j++] = byteParams[i];
-            }
+        ScanResult result;
+        for (int i = 0; i < scanResults.size(); i++){
+            result = scanResults.get(i);
+            String ssid = result.SSID;
+            arrayAdapter.add(ssid);
         }
 
-        return wmcpDataBuffer;
+        builder.setNegativeButton(getString(R.string.cancal), new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int which) {
+                dialogInterface.dismiss();
+            }
+        });
+
+        builder.setAdapter(arrayAdapter, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int which) {
+                String strName = arrayAdapter.getItem(which);
+                customWifiSSID.setText(strName);
+                //將客戶端無線基地台ssid的值給customWifiInit作為初始化用
+                customWifiInit.setText(customWifiSSID.getText().toString());
+            }
+        });
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
     }
 
-    public String setWiFiModuleConfig() {
-        DatagramSocket clientSocket = null;
-        byte[] rxData = new byte[512];
-        DatagramPacket dp = new DatagramPacket(rxData, rxData.length);
-        boolean setOK = false;
-        ArrayList<byte[]> wmcpDataArray = new ArrayList<>();
-
-        if (servIpAddr == null)
-            return "IP ERROR";
-
-        wmcpDataArray.add(wmcpDataSetReq(0x11, "0"));	//OPMODE 0:STA 1:AP
-        wmcpDataArray.add(wmcpDataSetReq(0x14, ssid));  //WSTA
-        if (password == "") {
-            wmcpDataArray.add(wmcpDataSetReq(0x15, "NONE"));  //WSTASEC
+    //檢查是否資料齊全
+    private void checkBeforeUpdate() {
+        //客戶端wifi ssid
+        if (TextUtils.isEmpty(customWifiSSID.getText().toString())){
+            Toast.makeText(MainActivity.this, getString(R.string.custom_ssid_is_empty), Toast.LENGTH_SHORT).show();
+            return;
         }
-        else {
-            wmcpDataArray.add(wmcpDataSetReq(0x15, "WPA2"));  //WSTASEC
-            String cypher = "AES";
-            String psk = cypher + "," + password;
-            wmcpDataArray.add(wmcpDataSetReq(0x16, psk));  //WSTAPSK
-        }
-        wmcpDataArray.add(wmcpDataSetReq(0x23, netProto)); //NSOCK
-        String client = remoteServ + "," + port;
-        wmcpDataArray.add(wmcpDataSetReq(0x24, client)); //NCLIENT
-        wmcpDataArray.add(wmcpDataSetReq(0x32, "")); // APPLY
 
-        try {
-            clientSocket = new DatagramSocket();
-            for (int i = 0; i < wmcpDataArray.size(); i++) {
-                byte[] wmcpDataPayload = wmcpDataArray.get(i);
-                byte cmdcode = wmcpDataPayload[1];
-                DatagramPacket packet = new DatagramPacket(wmcpDataPayload, wmcpDataPayload.length, servIpAddr, 60002);
+        //客戶端wifi password
+        if (TextUtils.isEmpty(customPassword.getText().toString())){
+            Toast.makeText(MainActivity.this, getString(R.string.password_is_empty), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        //write info to cjm410 flash and reboot system
+
+
+        Log.d(TAG, "checkBeforeUpdate: customWifiSSID:" + customWifiSSID.getText().toString() + ",password:" + customPassword.getText().toString());
+    }
+
+    //找出CJM410的ip(已變成Client端)
+    public class FindCJM410Ip extends AsyncTask{
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+        }
+
+        @Override
+        protected Object doInBackground(Object[] objects) {
+            byte[] broadcast = {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff};
+            byte[] getDevInfoReq = {0x01, 0x21, 0x01};
+            byte[] rxData = new byte[1024];
+            DatagramSocket clientSocket = null;
+            Log.d("CJN-WiFi","getWiFiModuleIp");
+            DatagramPacket dp = new DatagramPacket(rxData, rxData.length); //數據存在rxData中
+            try {
+                clientSocket = new DatagramSocket();
+                DatagramPacket packet = new DatagramPacket(getDevInfoReq, getDevInfoReq.length, InetAddress.getByAddress(broadcast), 60002);
+                clientSocket.setBroadcast(true);
                 clientSocket.send(packet);
-                int retry = 0;
-                while (retry < 3) {
-                    try {
-                        clientSocket.setSoTimeout(2000);
+                while(true){
+                    try{
+                        clientSocket.setSoTimeout(60000); //60秒(原:2000)
                         clientSocket.receive(dp);
 
                         byte[] data = dp.getData();
                         if (data[0] == 0x02 &&
-                                data[1] == cmdcode &&
-                                data[2] == 0x02) {
+                                data[1] == 0x21 &&
+                                data[2] == 0x01) {
                             // handle rx data
-                            byte[] resp = Arrays.copyOfRange(data, 3, dp.getLength());
-                            String strResp = new String(resp);
-                            String msg = String.format("Set cmdcode %x response=", cmdcode);
-                            Log.i("CJN", msg+strResp);
-                            if (strResp.equals("ok")) {
-                                setOK = true;
-                                break;
+                            byte[] ip = Arrays.copyOfRange(data, 3, dp.getLength());
+                            String strIp = new String(ip);
+                            if(!ipList.contains(strIp)){
+                                ipList.add(strIp);
                             }
-                            else {
-                                setOK = false;
-                                break;
-                            }
-
-
                         }
-                    } catch (SocketTimeoutException e) {
-                        retry += 1;
-                        clientSocket.send(packet);
-                        String str = String.format("Retry device configuration request : %d", retry);
-                        Log.i("CJN", str);
+                    }catch (SocketTimeoutException e) {
+                        Log.d("CJNWiFi", "getDevInfo Rx SocketTimeoutException" + e.toString());
+                        // No more device ACK
+                        break;
                     }
                 }
-                if (!setOK)
-                    break;
-            }
 
-        } catch (SocketException e) {
-            if (clientSocket != null) {
-                clientSocket.close();
+            } catch (SocketException e) {
+                if(clientSocket != null) {
+                    clientSocket.close();
+                }
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-            return "Socket Exception";
-        } catch (IOException e) {
-            if (clientSocket != null) {
-                clientSocket.close();
-            }
-            return "IO Exception";
+            Log.d(TAG, "doInBackground: "  + ipList.toString());
+            return ipList;
         }
 
-        if (clientSocket != null) {
-            clientSocket.close();
+
+        @Override
+        protected void onPostExecute(Object o) {
+            super.onPostExecute(o);
         }
-        return "OK";
     }
 }
